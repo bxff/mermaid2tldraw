@@ -1,0 +1,43 @@
+{
+  "name": "astro-mermaid-tldraw",
+  "version": "0.1.0",
+  "description": "Astro integration that turns Mermaid fences into locally editable tldraw meeting canvases",
+  "type": "module",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "astro": ">=5"
+  },
+  "dependencies": {
+    "mermaid": "^11.12.2",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "tldraw": "^4.3.1",
+    "unist-util-visit": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2"
+  }
+}

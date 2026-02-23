@@ -15,7 +15,7 @@ import 'tldraw/tldraw.css'
 import type { DiagramMode } from '../types'
 
 const PREVIEW_ERROR = 'Unable to render Mermaid preview.'
-const STORAGE_VERSION = 'v6-native-shapes-arc-oval'
+const STORAGE_VERSION = 'v8-native-shapes-arc-no-custom-bend'
 const MERMAID_FONT_SIZE_PX = 22
 let mermaidReady = false
 
@@ -561,7 +561,7 @@ async function seedEditorFromMermaid(editor: Editor, source: string, sourceHash:
         x,
         y,
         props: {
-          kind: 'elbow',
+          kind: 'arc',
           start: { x: start.x - x, y: start.y - y },
           end: { x: end.x - x, y: end.y - y },
           bend: 0,

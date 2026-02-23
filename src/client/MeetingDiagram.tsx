@@ -15,7 +15,7 @@ import 'tldraw/tldraw.css'
 import type { DiagramMode } from '../types'
 
 const PREVIEW_ERROR = 'Unable to render Mermaid preview.'
-const STORAGE_VERSION = 'v8-native-shapes-arc-no-custom-bend'
+const STORAGE_VERSION = 'v9-native-shapes-flowchart-hints'
 const MERMAID_FONT_SIZE_PX = 22
 let mermaidReady = false
 
@@ -273,13 +273,113 @@ function getNodeLabel(node: Element): string {
   return (node.textContent ?? '').replace(/\s+/g, ' ').trim()
 }
 
-function getNodeShapeKind(primitive: Element):
+type FlowchartShapeHint =
+  | 'rectangle'
+  | 'rounded'
+  | 'stadium'
+  | 'subroutine'
+  | 'database'
+  | 'circle'
+  | 'decision'
+  | 'asymmetric'
+  | 'parallelogram'
+  | 'parallelogram-alt'
+  | 'trapezoid'
+  | 'trapezoid-alt'
+  | 'hexagon'
+
+function extractFlowchartNodeShapeHints(source: string): Map<string, FlowchartShapeHint> {
+  const hints = new Map<string, FlowchartShapeHint>()
+
+  const applyRegex = (regex: RegExp, hint: FlowchartShapeHint) => {
+    for (const match of source.matchAll(regex)) {
+      const id = match[1]
+      if (id) hints.set(id, hint)
+    }
+  }
+
+  applyRegex(/\b([A-Za-z0-9_:-]+)\s*\(\(([^()]*)\)\)/g, 'circle')
+  applyRegex(/\b([A-Za-z0-9_:-]+)\s*\(\[([^\]]*)\]\)/g, 'stadium')
+  applyRegex(/\b([A-Za-z0-9_:-]+)\s*\[\[([^\]]*)\]\]/g, 'subroutine')
+  applyRegex(/\b([A-Za-z0-9_:-]+)\s*\[\(([^)]*)\)\]/g, 'database')
+  applyRegex(/\b([A-Za-z0-9_:-]+)\s*\{\{([^}]*)\}\}/g, 'hexagon')
+  applyRegex(/\b([A-Za-z0-9_:-]+)\s*\{(?!\{)([^}]*)\}(?!\})/g, 'decision')
+  applyRegex(/\b([A-Za-z0-9_:-]+)\s*\((?!\(|\[)([^)]*)\)/g, 'rounded')
+  applyRegex(/\b([A-Za-z0-9_:-]+)\s*>\s*([^\]]*)\]/g, 'asymmetric')
+
+  for (const match of source.matchAll(/\b([A-Za-z0-9_:-]+)\s*\[([^\]]*)\]/g)) {
+    const id = match[1]
+    const inner = (match[2] ?? '').trim()
+    if (!id || hints.has(id)) continue
+
+    const startsSlash = inner.startsWith('/')
+    const startsBackslash = inner.startsWith('\\')
+    const endsSlash = inner.endsWith('/')
+    const endsBackslash = inner.endsWith('\\')
+
+    if (startsSlash && endsSlash) {
+      hints.set(id, 'parallelogram')
+    } else if (startsBackslash && endsBackslash) {
+      hints.set(id, 'parallelogram-alt')
+    } else if (startsSlash && endsBackslash) {
+      hints.set(id, 'trapezoid')
+    } else if (startsBackslash && endsSlash) {
+      hints.set(id, 'trapezoid-alt')
+    } else {
+      hints.set(id, 'rectangle')
+    }
+  }
+
+  return hints
+}
+
+function getNodeIdFromMermaidGroup(groupId: string | null | undefined): string | null {
+  if (!groupId) return null
+  const match = groupId.match(/^flowchart-(.+)-\d+$/)
+  return match?.[1] ?? null
+}
+
+function selectNodePrimitive(group: Element): Element | null {
+  const candidates = Array.from(group.querySelectorAll('path,polygon,ellipse,circle,rect'))
+  if (candidates.length === 0) return null
+
+  const labeled = candidates.find((el) => (el.getAttribute('class') ?? '').includes('label-container'))
+  if (labeled) return labeled
+
+  const nonRect = candidates.find((el) => el.tagName.toLowerCase() !== 'rect')
+  if (nonRect) return nonRect
+
+  return candidates[0]
+}
+
+function estimateLabelMinWidth(text: string): number {
+  const plain = text.trim()
+  if (!plain) return 48
+  return Math.max(48, plain.length * 9 + 24)
+}
+
+function getNodeShapeKind(primitive: Element, hint?: FlowchartShapeHint):
   | 'rectangle'
   | 'diamond'
   | 'ellipse'
   | 'oval'
   | 'triangle'
-  | 'hexagon' {
+  | 'hexagon'
+  | 'rhombus'
+  | 'rhombus-2'
+  | 'trapezoid' {
+  if (hint) {
+    if (hint === 'decision') return 'diamond'
+    if (hint === 'circle') return 'ellipse'
+    if (hint === 'stadium') return 'oval'
+    if (hint === 'database') return 'oval'
+    if (hint === 'hexagon') return 'hexagon'
+    if (hint === 'parallelogram') return 'rhombus'
+    if (hint === 'parallelogram-alt') return 'rhombus-2'
+    if (hint === 'trapezoid' || hint === 'trapezoid-alt' || hint === 'asymmetric') return 'trapezoid'
+    if (hint === 'subroutine' || hint === 'rounded' || hint === 'rectangle') return 'rectangle'
+  }
+
   const tag = primitive.tagName.toLowerCase()
   if (tag === 'polygon') {
     const rawPoints = primitive.getAttribute('points') ?? ''
@@ -295,9 +395,6 @@ function getNodeShapeKind(primitive: Element):
     return 'diamond'
   }
   if (tag === 'ellipse' || tag === 'circle') return 'ellipse'
-  // Mermaid uses <path> for some special nodes (e.g. database-like nodes).
-  // Tldraw has no native cylinder geo, and 'oval' looks too stylized here,
-  // so ellipse is the closest neutral match.
   if (tag === 'path') return 'oval'
   return 'rectangle'
 }
@@ -456,6 +553,7 @@ async function seedEditorFromMermaid(editor: Editor, source: string, sourceHash:
   try {
     const nodeShapes: any[] = []
     const arrowShapes: any[] = []
+    const nodeShapeHints = extractFlowchartNodeShapeHints(source)
 
     const edgeLabels = Array.from(mountedSvg.querySelectorAll('g.edgeLabel'))
       .map((label) => {
@@ -467,11 +565,14 @@ async function seedEditorFromMermaid(editor: Editor, source: string, sourceHash:
 
     const nodeGroups = Array.from(mountedSvg.querySelectorAll('g.node.default'))
     for (const group of nodeGroups) {
-      const primitive = group.querySelector('rect,polygon,ellipse,circle,path')
+      const primitive = selectNodePrimitive(group)
       if (!primitive) continue
 
       const box = getNodeBoundingBox(group, primitive)
       if (!box) continue
+
+      const nodeId = getNodeIdFromMermaidGroup(group.getAttribute('id'))
+      const shapeHint = nodeId ? nodeShapeHints.get(nodeId) : undefined
 
       const primitiveStyles = window.getComputedStyle(primitive)
       const labelStyles = window.getComputedStyle(group)
@@ -481,18 +582,32 @@ async function seedEditorFromMermaid(editor: Editor, source: string, sourceHash:
       const strokeDasharray = primitive.getAttribute('stroke-dasharray') ?? primitiveStyles.strokeDasharray
       const strokeWidth = primitive.getAttribute('stroke-width') ?? primitiveStyles.strokeWidth
       const text = getNodeLabel(group)
+      const minTextWidth = estimateLabelMinWidth(text)
 
       const shapeColor = mapThemeStrokeToTldrawColor(stroke)
       const labelColor = mapThemeStrokeToTldrawColor(labelStyles.fill || stroke)
+      const geo = getNodeShapeKind(primitive, shapeHint)
+
+      let width = Math.max(box.w, minTextWidth)
+      let height = Math.max(box.h, 44)
+
+      if (shapeHint === 'circle') {
+        const diameter = Math.max(width, height)
+        width = diameter
+        height = diameter
+      } else if (shapeHint === 'decision') {
+        width = Math.max(width, height)
+        height = Math.max(height, 72)
+      }
 
       nodeShapes.push({
         type: 'geo',
         x: box.x,
         y: box.y,
         props: {
-          geo: getNodeShapeKind(primitive),
-          w: box.w,
-          h: box.h,
+          geo,
+          w: width,
+          h: height,
           richText: toRichText(text),
           color: shapeColor,
           labelColor,

@@ -64,6 +64,14 @@ The fence is transformed into:
 - Conversion is Mermaid SVG -> native tldraw shapes (`geo` + `arrow`) so the result is editable as real tldraw primitives.
 - Works in Astro Markdown (`.md`) and MDX (`.mdx`) content.
 
+## Native conversion coverage
+
+- `flowchart` is the main supported family in edit mode (native `geo` + `arrow` output).
+- Common flowchart nodes (rectangle, rounded, stadium, subroutine, database, circle, decision, hexagon, parallelogram/trapezoid variants) are mapped to editable tldraw shapes.
+- Subgraphs/clusters are converted to container boxes with label text.
+- Edge arrows, dashes, and many labels are converted to native arrows.
+- Non-flowchart Mermaid families (for example `sequenceDiagram` and `classDiagram`) keep static preview behavior and currently do not guarantee high-fidelity native edit conversion.
+
 ## Local demo
 
 This repo includes a runnable Astro demo in `demo/`.

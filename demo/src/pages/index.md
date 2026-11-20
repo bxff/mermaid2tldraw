@@ -50,3 +50,29 @@ classDiagram
   }
   DiagramSource --> MeetingDraft
 ```
+
+## Figure compatibility fixture
+
+```mermaid
+flowchart TB
+  subgraph Core figures
+    A[Rectangle] --> B(Rounded)
+    B --> C([Stadium])
+    C --> D[[Subroutine]]
+    D --> E[(Database)]
+    E --> F((Circle))
+    F --> G{Decision}
+  end
+
+  subgraph Angled figures
+    H>Asymmetric] --> I[/Parallelogram/]
+    I --> J[\Parallelogram alt\]
+    J --> K[/Trapezoid\]
+    K --> L[\Trapezoid alt/]
+    L --> M{{Hexagon}}
+  end
+
+  G --> H
+  G -. dashed .-> I
+  G ==> M
+```

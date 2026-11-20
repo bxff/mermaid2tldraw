@@ -15,7 +15,7 @@ import 'tldraw/tldraw.css'
 import type { DiagramMode } from '../types'
 
 const PREVIEW_ERROR = 'Unable to render Mermaid preview.'
-const STORAGE_VERSION = 'v9-native-shapes-flowchart-hints'
+const STORAGE_VERSION = 'v12-native-shapes-fidelity-pass'
 const MERMAID_FONT_SIZE_PX = 22
 let mermaidReady = false
 
@@ -228,6 +228,43 @@ function parseCssRgb(value: string): { r: number; g: number; b: number } | null 
   return { r, g, b }
 }
 
+function parseHexColor(value: string): { r: number; g: number; b: number } | null {
+  const match = value.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
+  if (!match) return null
+  const raw = match[1]
+  if (raw.length === 3) {
+    return {
+      r: Number.parseInt(`${raw[0]}${raw[0]}`, 16),
+      g: Number.parseInt(`${raw[1]}${raw[1]}`, 16),
+      b: Number.parseInt(`${raw[2]}${raw[2]}`, 16),
+    }
+  }
+  return {
+    r: Number.parseInt(raw.slice(0, 2), 16),
+    g: Number.parseInt(raw.slice(2, 4), 16),
+    b: Number.parseInt(raw.slice(4, 6), 16),
+  }
+}
+
+function parseCssRgba(value: string): { r: number; g: number; b: number; a: number } | null {
+  const match = value.match(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/i)
+  if (!match) return null
+  const r = Number.parseFloat(match[1])
+  const g = Number.parseFloat(match[2])
+  const b = Number.parseFloat(match[3])
+  const a = Number.parseFloat(match[4])
+  if (![r, g, b, a].every(Number.isFinite)) return null
+  return { r, g, b, a }
+}
+
+function getRelativeLuminance({ r, g, b }: { r: number; g: number; b: number }): number {
+  const linear = [r, g, b].map((value) => {
+    const normalized = value / 255
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+}
+
 function rgbToHue({ r, g, b }: { r: number; g: number; b: number }): number {
   const nr = r / 255
   const ng = g / 255
@@ -355,7 +392,31 @@ function selectNodePrimitive(group: Element): Element | null {
 function estimateLabelMinWidth(text: string): number {
   const plain = text.trim()
   if (!plain) return 48
-  return Math.max(48, plain.length * 9 + 24)
+  return Math.max(84, plain.length * 14 + 52)
+}
+
+function estimateNodeMinWidth(text: string, hint?: FlowchartShapeHint): number {
+  const base = estimateLabelMinWidth(text)
+  switch (hint) {
+    case 'decision':
+      return Math.max(140, base + 28)
+    case 'database':
+      return Math.max(156, base + 30)
+    case 'subroutine':
+      return Math.max(148, base + 24)
+    case 'hexagon':
+      return Math.max(148, base + 20)
+    case 'asymmetric':
+      return Math.max(148, base + 22)
+    case 'trapezoid':
+    case 'trapezoid-alt':
+      return Math.max(146, base + 20)
+    case 'parallelogram':
+    case 'parallelogram-alt':
+      return Math.max(144, base + 16)
+    default:
+      return base
+  }
 }
 
 function getNodeShapeKind(primitive: Element, hint?: FlowchartShapeHint):
@@ -414,13 +475,27 @@ function getElementBBox(element: Element): { x: number; y: number; w: number; h:
 function mapThemeStrokeToTldrawColor(stroke: string | null | undefined):
   | 'black'
   | 'grey'
+  | 'blue'
   | 'light-blue'
+  | 'yellow'
+  | 'orange'
   | 'green'
+  | 'light-green'
+  | 'red'
+  | 'light-red'
+  | 'light-violet'
   | 'violet' {
   const value = (stroke ?? '').toLowerCase()
   if (value.includes('a855f7') || value.includes('9333ea') || value.includes('purple')) return 'violet'
+  if (value.includes('c4b5fd') || value.includes('a78bfa')) return 'light-violet'
   if (value.includes('0ea5e9') || value.includes('0284c7') || value.includes('blue')) return 'light-blue'
+  if (value.includes('2563eb') || value.includes('1d4ed8')) return 'blue'
+  if (value.includes('eab308') || value.includes('facc15')) return 'yellow'
+  if (value.includes('f97316') || value.includes('ea580c')) return 'orange'
   if (value.includes('16a34a') || value.includes('22c55e') || value.includes('green')) return 'green'
+  if (value.includes('86efac') || value.includes('4ade80')) return 'light-green'
+  if (value.includes('ef4444') || value.includes('dc2626')) return 'red'
+  if (value.includes('fca5a5') || value.includes('f87171')) return 'light-red'
   if (value.includes('6b7280') || value.includes('71717a') || value.includes('gray')) return 'grey'
 
   const rgb = parseCssRgb(value)
@@ -432,8 +507,13 @@ function mapThemeStrokeToTldrawColor(stroke: string | null | undefined):
 
     const hue = rgbToHue(rgb)
     const normalizedHue = hue < 0 ? hue + 360 : hue
+    if (normalizedHue >= 35 && normalizedHue < 70) return 'yellow'
+    if (normalizedHue >= 12 && normalizedHue < 35) return 'orange'
+    if (normalizedHue >= 345 || normalizedHue < 12) return 'red'
     if (normalizedHue >= 85 && normalizedHue <= 165) return 'green'
+    if (normalizedHue >= 165 && normalizedHue < 190) return 'light-green'
     if (normalizedHue >= 190 && normalizedHue <= 245) return 'light-blue'
+    if (normalizedHue >= 245 && normalizedHue < 265) return 'blue'
     if (normalizedHue >= 255 && normalizedHue <= 320) return 'violet'
   }
 
@@ -443,7 +523,20 @@ function mapThemeStrokeToTldrawColor(stroke: string | null | undefined):
 function mapFillToTldrawFill(fill: string | null | undefined): 'none' | 'semi' | 'solid' {
   const value = (fill ?? '').toLowerCase()
   if (!value || value === 'none' || value === 'transparent') return 'none'
-  if (value.includes('ec') || value.includes('f') || value.includes('light')) return 'semi'
+
+  const rgba = parseCssRgba(value)
+  if (rgba) {
+    if (rgba.a <= 0.08) return 'none'
+    if (rgba.a < 0.55) return 'semi'
+    return getRelativeLuminance(rgba) >= 0.82 ? 'semi' : 'solid'
+  }
+
+  const rgb = parseCssRgb(value) ?? parseHexColor(value)
+  if (rgb) {
+    return getRelativeLuminance(rgb) >= 0.82 ? 'semi' : 'solid'
+  }
+
+  if (value.includes('light') || value.includes('pastel')) return 'semi'
   return 'solid'
 }
 
@@ -528,6 +621,88 @@ function getNodeBoundingBox(group: Element, primitive: Element): { x: number; y:
   }
 }
 
+type ClusterInfo = {
+  x: number
+  y: number
+  w: number
+  h: number
+  label: string
+  labelX: number
+  labelY: number
+  strokeColor: ReturnType<typeof mapThemeStrokeToTldrawColor>
+  fillStyle: 'none' | 'semi' | 'solid'
+}
+
+function extractClusters(mountedSvg: SVGSVGElement): ClusterInfo[] {
+  const rects = Array.from(mountedSvg.querySelectorAll('g.cluster > rect')).map((rect) => {
+    const x = Number.parseFloat(rect.getAttribute('x') ?? '')
+    const y = Number.parseFloat(rect.getAttribute('y') ?? '')
+    const w = Number.parseFloat(rect.getAttribute('width') ?? '')
+    const h = Number.parseFloat(rect.getAttribute('height') ?? '')
+    if (![x, y, w, h].every(Number.isFinite)) return null
+
+    const styles = window.getComputedStyle(rect)
+    const stroke = rect.getAttribute('stroke') ?? styles.stroke
+    const fill = rect.getAttribute('fill') ?? styles.fill
+
+    return {
+      x,
+      y,
+      w,
+      h,
+      strokeColor: mapThemeStrokeToTldrawColor(stroke),
+      fillStyle: mapFillToTldrawFill(fill),
+    }
+  })
+
+  const labels = Array.from(mountedSvg.querySelectorAll('g.cluster-label')).map((label) => {
+    const text = (label.textContent ?? '').replace(/\s+/g, ' ').trim()
+    const { x, y } = parseTranslate(label.getAttribute('transform'))
+    return text ? { x, y, text, used: false } : null
+  })
+
+  const filteredRects = rects.filter((item): item is NonNullable<typeof item> => Boolean(item))
+  const filteredLabels = labels.filter((item): item is NonNullable<typeof item> => Boolean(item))
+
+  const sortedRects = [...filteredRects].sort((a, b) => (a.y - b.y) || (a.x - b.x))
+
+  return sortedRects.map((rect) => {
+    const targetX = rect.x + rect.w / 2
+    const targetY = rect.y
+
+    let bestLabel = ''
+    let bestLabelX = targetX
+    let bestLabelY = targetY
+    let bestScore = Number.POSITIVE_INFINITY
+    let bestIndex = -1
+
+    for (let idx = 0; idx < filteredLabels.length; idx++) {
+      const label = filteredLabels[idx]
+      if (label.used) continue
+      const dx = Math.abs(label.x - targetX)
+      const dy = Math.abs(label.y - targetY)
+      const withinBand = label.x >= rect.x - 48 && label.x <= rect.x + rect.w + 48
+      const score = dy * 2 + dx * (withinBand ? 0.35 : 1.2)
+      if (score < bestScore) {
+        bestScore = score
+        bestLabel = label.text
+        bestLabelX = label.x
+        bestLabelY = label.y
+        bestIndex = idx
+      }
+    }
+
+    if (bestIndex >= 0) filteredLabels[bestIndex].used = true
+
+    return {
+      ...rect,
+      label: bestLabel,
+      labelX: bestLabelX,
+      labelY: bestLabelY,
+    }
+  })
+}
+
 async function seedEditorFromMermaid(editor: Editor, source: string, sourceHash: string, seedSvg?: string): Promise<void> {
   const svgMarkup = seedSvg && seedSvg.trim().length > 0 ? seedSvg : await renderMermaidSvg(source, `mermaid-seed-${sourceHash}`)
   const svgDoc = new DOMParser().parseFromString(svgMarkup, 'image/svg+xml')
@@ -551,9 +726,66 @@ async function seedEditorFromMermaid(editor: Editor, source: string, sourceHash:
   document.body.appendChild(sandbox)
 
   try {
+    const clusterShapes: any[] = []
+    const clusterLabelShapes: any[] = []
     const nodeShapes: any[] = []
+    const detailShapes: any[] = []
     const arrowShapes: any[] = []
     const nodeShapeHints = extractFlowchartNodeShapeHints(source)
+
+    const clusters = extractClusters(mountedSvg)
+    for (const cluster of clusters) {
+      clusterShapes.push({
+        type: 'geo',
+        x: cluster.x,
+        y: cluster.y,
+        props: {
+          geo: 'rectangle',
+          w: cluster.w,
+          h: cluster.h,
+          richText: toRichText(''),
+          color: cluster.strokeColor,
+          labelColor: 'black',
+          fill: cluster.fillStyle === 'none' ? 'semi' : cluster.fillStyle,
+          dash: 'solid',
+          size: 's',
+          align: 'middle-legacy',
+          verticalAlign: 'middle',
+          font: 'sans',
+          scale: 1,
+          growY: 0,
+          url: '',
+        },
+      })
+
+      if (cluster.label) {
+        const labelWidth = Math.max(96, estimateLabelMinWidth(cluster.label) - 24)
+        const labelTop = cluster.labelY < cluster.y ? cluster.labelY - 10 : cluster.y - 18
+        clusterLabelShapes.push({
+          type: 'text',
+          x: cluster.labelX - labelWidth / 2,
+          y: labelTop,
+          props: {
+            color: 'black',
+            size: 's',
+            font: 'sans',
+            textAlign: 'middle',
+            w: labelWidth,
+            richText: toRichText(cluster.label),
+            scale: 1,
+            autoSize: false,
+          },
+        })
+      }
+    }
+
+    let defaultNodeColor: ReturnType<typeof mapThemeStrokeToTldrawColor> = 'black'
+    const seedPrimitive = mountedSvg.querySelector('g.node.default .label-container, g.node.default rect, g.node.default path')
+    if (seedPrimitive) {
+      const seedStyles = window.getComputedStyle(seedPrimitive)
+      const seedStroke = seedPrimitive.getAttribute('stroke') ?? seedStyles.stroke
+      defaultNodeColor = mapThemeStrokeToTldrawColor(seedStroke)
+    }
 
     const edgeLabels = Array.from(mountedSvg.querySelectorAll('g.edgeLabel'))
       .map((label) => {
@@ -582,10 +814,11 @@ async function seedEditorFromMermaid(editor: Editor, source: string, sourceHash:
       const strokeDasharray = primitive.getAttribute('stroke-dasharray') ?? primitiveStyles.strokeDasharray
       const strokeWidth = primitive.getAttribute('stroke-width') ?? primitiveStyles.strokeWidth
       const text = getNodeLabel(group)
-      const minTextWidth = estimateLabelMinWidth(text)
+      const minTextWidth = estimateNodeMinWidth(text, shapeHint)
 
       const shapeColor = mapThemeStrokeToTldrawColor(stroke)
       const labelColor = mapThemeStrokeToTldrawColor(labelStyles.fill || stroke)
+      const resolvedShapeColor = shapeColor === 'black' && defaultNodeColor !== 'black' ? defaultNodeColor : shapeColor
       const geo = getNodeShapeKind(primitive, shapeHint)
 
       let width = Math.max(box.w, minTextWidth)
@@ -598,22 +831,29 @@ async function seedEditorFromMermaid(editor: Editor, source: string, sourceHash:
       } else if (shapeHint === 'decision') {
         width = Math.max(width, height)
         height = Math.max(height, 72)
+      } else if (shapeHint === 'database') {
+        width = Math.max(width, box.w * 1.1)
+        height = Math.max(48, Math.min(height, width * 0.55))
       }
+
+      const shapeX = box.x - (width - box.w) / 2
+      const shapeY = box.y - (height - box.h) / 2
+      const nodeSize = shapeHint === 'circle' || shapeHint === 'database' ? 's' : mapStrokeWidthToSize(strokeWidth)
 
       nodeShapes.push({
         type: 'geo',
-        x: box.x,
-        y: box.y,
+        x: shapeX,
+        y: shapeY,
         props: {
           geo,
           w: width,
           h: height,
           richText: toRichText(text),
-          color: shapeColor,
+          color: resolvedShapeColor,
           labelColor,
           fill: mapFillToTldrawFill(fill),
           dash: mapDashStyleFromClassAndStroke(primitive.getAttribute('class'), strokeDasharray),
-          size: mapStrokeWidthToSize(strokeWidth),
+          size: nodeSize,
           align: 'middle-legacy',
           verticalAlign: 'middle',
           font: 'sans',
@@ -622,6 +862,89 @@ async function seedEditorFromMermaid(editor: Editor, source: string, sourceHash:
           url: '',
         },
       })
+
+      if (shapeHint === 'subroutine') {
+        const inset = Math.max(6, Math.min(10, width * 0.06))
+        const top = shapeY
+        const bottom = shapeY + height
+        detailShapes.push(
+          {
+            type: 'line',
+            x: shapeX + inset,
+            y: top,
+            props: {
+              color: resolvedShapeColor,
+              dash: 'solid',
+              size: 's',
+              spline: 'line',
+              points: {
+                a1: { id: 'a1', index: 'a1', x: 0, y: 0 },
+                a2: { id: 'a2', index: 'a2', x: 0, y: bottom - top },
+              },
+              scale: 1,
+            },
+          },
+          {
+            type: 'line',
+            x: shapeX + width - inset,
+            y: top,
+            props: {
+              color: resolvedShapeColor,
+              dash: 'solid',
+              size: 's',
+              spline: 'line',
+              points: {
+                a1: { id: 'a1', index: 'a1', x: 0, y: 0 },
+                a2: { id: 'a2', index: 'a2', x: 0, y: bottom - top },
+              },
+              scale: 1,
+            },
+          }
+        )
+      }
+
+      if (shapeHint === 'database') {
+        const upperOffset = Math.max(10, Math.min(20, height * 0.24))
+        const lowerOffset = Math.max(9, Math.min(18, height * 0.2))
+        const lineYTop = shapeY + upperOffset
+        const lineYBottom = shapeY + height - lowerOffset
+        const inset = Math.max(8, Math.min(14, width * 0.1))
+        detailShapes.push({
+          type: 'line',
+          x: shapeX + inset,
+          y: lineYTop,
+          props: {
+            color: resolvedShapeColor,
+            dash: 'solid',
+            size: 's',
+            spline: 'line',
+            points: {
+              a1: { id: 'a1', index: 'a1', x: 0, y: 0 },
+              a2: { id: 'a2', index: 'a2', x: width - inset * 2, y: 0 },
+            },
+            scale: 1,
+          },
+        })
+
+        if (lineYBottom - lineYTop > 8) {
+          detailShapes.push({
+            type: 'line',
+            x: shapeX + inset,
+            y: lineYBottom,
+            props: {
+              color: resolvedShapeColor,
+              dash: 'solid',
+              size: 's',
+              spline: 'line',
+              points: {
+                a1: { id: 'a1', index: 'a1', x: 0, y: 0 },
+                a2: { id: 'a2', index: 'a2', x: width - inset * 2, y: 0 },
+              },
+              scale: 1,
+            },
+          })
+        }
+      }
     }
 
     const edgePaths = Array.from(mountedSvg.querySelectorAll('g.edgePaths path[data-edge="true"], g.edgePaths path.flowchart-link'))
@@ -700,7 +1023,7 @@ async function seedEditorFromMermaid(editor: Editor, source: string, sourceHash:
       throw new Error('No native shapes were produced from Mermaid SVG')
     }
 
-    editor.createShapes([...arrowShapes, ...nodeShapes] as any)
+    editor.createShapes([...clusterShapes, ...arrowShapes, ...nodeShapes, ...detailShapes, ...clusterLabelShapes] as any)
     editor.zoomToFit({ animation: { duration: 200 } })
   } finally {
     sandbox.remove()
